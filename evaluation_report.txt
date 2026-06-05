@@ -1,0 +1,47 @@
+============================================================
+EVALUATION REPORT - Rip Current Classifier (Safe/Danger)
+============================================================
+
+Fitur dasar: kecepatan arus, arah arus (per 3 buoy)
+Klasifikasi: 2 kelas binary - Safe vs Danger
+
+Dataset: features_engineered.csv
+Total samples: 3000
+Features: 15
+Classes: ['Danger', 'Safe']
+
+Train accuracy: 1.0000
+Test accuracy : 1.0000
+CV accuracy   : 1.0000 +/- 0.0000
+
+Classification Report:
+              precision    recall  f1-score   support
+
+      Danger     1.0000    1.0000    1.0000       300
+        Safe     1.0000    1.0000    1.0000       300
+
+    accuracy                         1.0000       600
+   macro avg     1.0000    1.0000    1.0000       600
+weighted avg     1.0000    1.0000    1.0000       600
+
+Confusion Matrix:
+Labels: ['Danger', 'Safe']
+[[300   0]
+ [  0 300]]
+
+Feature Importance (all):
+kec_mean             0.219906
+kec_max              0.194754
+b2_kecepatan_arus    0.182112
+b3_kecepatan_arus    0.127491
+b1_kecepatan_arus    0.122303
+kec_std              0.052584
+dir_consistency      0.039974
+dir_offshore_b2      0.025964
+kec_diff_center      0.019808
+rip_speed_ratio      0.006696
+dir_diff_center      0.005623
+b2_arah_arus         0.001865
+b3_arah_arus         0.000419
+dir_mean             0.000376
+b1_arah_arus         0.000123

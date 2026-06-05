@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+/* Pastikan html dan body mengambil 100% tinggi dan lebar layar */
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden; /* Mencegah scroll horizontal yang tidak diinginkan */
+}
+
+body {
+  background-color: #f8fafc; /* Sesuaikan dengan warna background Figma-mu */
+}
