@@ -5,37 +5,43 @@ export function HistoryTable({ data }) {
   return (
     <Card className="border-gray-200 shadow-sm">
       <CardHeader className="pb-3 border-b border-gray-100">
-        <CardTitle className="text-sm text-gray-500">Historical Readings (3 Buoys)</CardTitle>
+        <CardTitle className="text-sm text-gray-500">Historical Readings (3 Buoys + Wave Intensity)</CardTitle>
       </CardHeader>
       <CardContent className="p-0">
         <div className="max-h-[600px] overflow-auto">
           <Table>
             <TableHeader className="sticky top-0 bg-white z-10 shadow-sm">
               <TableRow className="border-gray-100">
-                <TableHead className="text-xs text-gray-500">Date</TableHead>
-                <TableHead className="text-xs text-gray-500">Time</TableHead>
-                <TableHead className="text-xs text-gray-500 text-right">D1 Spd</TableHead>
-                <TableHead className="text-xs text-gray-500 text-right">D1 Dir</TableHead>
-                <TableHead className="text-xs text-gray-500 text-right">D2 Spd</TableHead>
-                <TableHead className="text-xs text-gray-500 text-right">D2 Dir</TableHead>
-                <TableHead className="text-xs text-gray-500 text-right">D3 Spd</TableHead>
-                <TableHead className="text-xs text-gray-500 text-right">D3 Dir</TableHead>
-                <TableHead className="text-xs text-gray-500 text-center">Status</TableHead>
+                <TableHead className="text-xs">Date</TableHead>
+                <TableHead className="text-xs">Time</TableHead>
+                <TableHead className="text-xs text-right">D1 v</TableHead>
+                <TableHead className="text-xs text-right">D1 °</TableHead>
+                <TableHead className="text-xs text-right">D1 wave</TableHead>
+                <TableHead className="text-xs text-right">D2 v</TableHead>
+                <TableHead className="text-xs text-right">D2 °</TableHead>
+                <TableHead className="text-xs text-right">D2 wave</TableHead>
+                <TableHead className="text-xs text-right">D3 v</TableHead>
+                <TableHead className="text-xs text-right">D3 °</TableHead>
+                <TableHead className="text-xs text-right">D3 wave</TableHead>
+                <TableHead className="text-xs text-center">Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.map((reading, index) => (
-                <TableRow key={index} className="border-gray-100 hover:bg-gray-50 transition-colors">
-                  <TableCell className="text-sm text-gray-900">{reading.date}</TableCell>
-                  <TableCell className="text-sm text-gray-600 tabular-nums">{reading.time}</TableCell>
-                  <TableCell className="text-sm text-gray-600 text-right tabular-nums">{reading.device1Speed.toFixed(2)}</TableCell>
-                  <TableCell className="text-sm text-gray-600 text-right tabular-nums">{Math.round(reading.device1Direction)}°</TableCell>
-                  <TableCell className="text-sm text-gray-600 text-right tabular-nums">{reading.device2Speed.toFixed(2)}</TableCell>
-                  <TableCell className="text-sm text-gray-600 text-right tabular-nums">{Math.round(reading.device2Direction)}°</TableCell>
-                  <TableCell className="text-sm text-gray-600 text-right tabular-nums">{reading.device3Speed.toFixed(2)}</TableCell>
-                  <TableCell className="text-sm text-gray-600 text-right tabular-nums">{Math.round(reading.device3Direction)}°</TableCell>
+              {data.map((r, i) => (
+                <TableRow key={i} className="border-gray-100 hover:bg-gray-50">
+                  <TableCell className="text-xs">{r.date}</TableCell>
+                  <TableCell className="text-xs tabular-nums">{r.time}</TableCell>
+                  <TableCell className="text-xs text-right tabular-nums">{r.device1Speed?.toFixed(2)}</TableCell>
+                  <TableCell className="text-xs text-right tabular-nums">{Math.round(r.device1Direction || 0)}</TableCell>
+                  <TableCell className="text-xs text-right tabular-nums">{r.device1Wave?.toFixed(1)}</TableCell>
+                  <TableCell className="text-xs text-right tabular-nums">{r.device2Speed?.toFixed(2)}</TableCell>
+                  <TableCell className="text-xs text-right tabular-nums">{Math.round(r.device2Direction || 0)}</TableCell>
+                  <TableCell className="text-xs text-right tabular-nums">{r.device2Wave?.toFixed(1)}</TableCell>
+                  <TableCell className="text-xs text-right tabular-nums">{r.device3Speed?.toFixed(2)}</TableCell>
+                  <TableCell className="text-xs text-right tabular-nums">{Math.round(r.device3Direction || 0)}</TableCell>
+                  <TableCell className="text-xs text-right tabular-nums">{r.device3Wave?.toFixed(1)}</TableCell>
                   <TableCell className="text-center">
-                    <StatusBadge status={reading.status} />
+                    <StatusBadge status={r.status} />
                   </TableCell>
                 </TableRow>
               ))}
@@ -53,7 +59,7 @@ function StatusBadge({ status }) {
     Safe:   "bg-green-50 text-green-700 border-green-200",
   };
   return (
-    <span className={`inline-block px-2 py-0.5 rounded border text-xs font-medium ${styles[status] || "bg-gray-50 text-gray-700 border-gray-200"}`}>
+    <span className={`inline-block px-2 py-0.5 rounded border text-xs font-medium ${styles[status] || "bg-gray-50 text-gray-700"}`}>
       {status}
     </span>
   );
