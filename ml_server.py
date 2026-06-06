@@ -1,36 +1,18 @@
 """
 ==============================================================================
-ML SERVICE - Flask Server untuk Backend Bintang
+ML SERVICE - Flask Server (3 fitur per buoy)
 ==============================================================================
-HTTP server yang expose endpoint POST /predict.
-Backend Bintang (Node.js) akan memanggil endpoint ini setiap ada data sensor.
-
-ARSITEKTUR:
-    [Buoy Hardware] -> [Gateway USB] -> [ML Service ini :8000] <- [Backend Bintang :5000]
-                                                  ^
-                                                  |
-                                          POST /predict
-                                          dengan data 3 device
-
-ENDPOINT:
+Endpoint:
     POST /predict
-        Input  : { device1_speed, device1_direction,
-                   device2_speed, device2_direction,
-                   device3_speed, device3_direction,
-                   timestamp }
-        Output : { prediction: "Safe" | "Danger",
-                   confidence: 0.0-1.0,
-                   probability_safe: 0.0-1.0,
-                   probability_danger: 0.0-1.0 }
+        Input:
+            device1_speed, device1_direction, device1_wave_intensity,
+            device2_speed, device2_direction, device2_wave_intensity,
+            device3_speed, device3_direction, device3_wave_intensity,
+            timestamp
+        Output:
+            {"prediction": "Safe"|"Danger", "confidence": 0-1, ...}
     
     GET /health
-        Output : { status: "ok", model_loaded: true/false }
-
-Cara pakai:
-    pip install flask flask-cors
-    python ml_server.py
-    
-    Server listen di http://localhost:8000
 """
 
 import sys
@@ -44,21 +26,17 @@ try:
     import pandas as pd
     import joblib
 except ImportError as e:
-    print(f"ERROR: Library tidak terinstall: {e}")
+    print(f"ERROR: {e}")
     print("Install: pip install flask flask-cors numpy pandas scikit-learn joblib")
     sys.exit(1)
 
-
-# ==================== KONFIGURASI ====================
-
 PORT = 8000
 MODEL_FILE = "rip_current_model.joblib"
-SHORE_NORMAL = 180.0  # offshore direction
+SHORE_NORMAL = 180.0
 
 app = Flask(__name__)
-CORS(app)  # supaya backend Bintang bisa call
+CORS(app)
 
-# Load model saat startup
 model_bundle = None
 model = None
 feature_names = None
@@ -66,12 +44,10 @@ classes = None
 
 
 def load_model():
-    """Load model joblib saat startup."""
     global model_bundle, model, feature_names, classes
     
     if not Path(MODEL_FILE).exists():
         print(f"WARNING: {MODEL_FILE} tidak ditemukan!")
-        print(f"         Jalankan dulu: python step3_train_random_forest.py")
         return False
     
     try:
@@ -80,21 +56,16 @@ def load_model():
         feature_names = model_bundle["feature_names"]
         classes = model_bundle["classes"]
         
-        print(f"[ML] Model loaded successfully")
+        print(f"[ML] Model loaded")
         print(f"     Classes: {classes}")
         print(f"     Features: {len(feature_names)}")
-        print(f"     Test accuracy: {model_bundle.get('test_accuracy', 'N/A')}")
         return True
     except Exception as e:
-        print(f"ERROR loading model: {e}")
+        print(f"ERROR: {e}")
         return False
 
 
-# ==================== FEATURE ENGINEERING ====================
-# HARUS PERSIS SAMA dengan step2_feature_engineering.py
-
 def circular_mean_std(angles_deg):
-    """Hitung mean dan consistency untuk circular data."""
     angles_rad = np.deg2rad(angles_deg)
     mean_cos = np.mean(np.cos(angles_rad))
     mean_sin = np.mean(np.sin(angles_rad))
@@ -104,27 +75,27 @@ def circular_mean_std(angles_deg):
 
 
 def angular_diff_abs(a1, a2):
-    """Selisih absolut sudut (0-180)."""
-    diff = (a1 - a2 + 180) % 360 - 180
-    return abs(diff)
+    return abs((a1 - a2 + 180) % 360 - 180)
 
 
-def build_feature_vector(d1_speed, d1_dir, d2_speed, d2_dir, d3_speed, d3_dir):
-    """Bangun feature vector LENGKAP sesuai training step2_feature_engineering.py.
-    
-    HARUS persis sama dengan saat training!
-    """
+def build_feature_vector(d1_speed, d1_dir, d1_wave,
+                         d2_speed, d2_dir, d2_wave,
+                         d3_speed, d3_dir, d3_wave):
+    """Build feature vector lengkap sesuai training."""
     feat = {}
     
-    # === Fitur dasar per buoy ===
+    # Fitur dasar per buoy
     feat["b1_kecepatan_arus"] = d1_speed
     feat["b1_arah_arus"]      = d1_dir
+    feat["b1_wave_intensity"] = d1_wave
     feat["b2_kecepatan_arus"] = d2_speed
     feat["b2_arah_arus"]      = d2_dir
+    feat["b2_wave_intensity"] = d2_wave
     feat["b3_kecepatan_arus"] = d3_speed
     feat["b3_arah_arus"]      = d3_dir
+    feat["b3_wave_intensity"] = d3_wave
     
-    # === Fitur agregat KECEPATAN ===
+    # Kecepatan agregat
     speeds = [d1_speed, d2_speed, d3_speed]
     feat["kec_mean"] = float(np.mean(speeds))
     feat["kec_std"]  = float(np.std(speeds, ddof=1)) if len(speeds) > 1 else 0.0
@@ -132,158 +103,123 @@ def build_feature_vector(d1_speed, d1_dir, d2_speed, d2_dir, d3_speed, d3_dir):
     feat["kec_diff_center"] = d2_speed - 0.5 * (d1_speed + d3_speed)
     feat["rip_speed_ratio"] = d2_speed / (0.5 * (d1_speed + d3_speed) + 1e-6)
     
-    # === Fitur agregat ARAH (circular) ===
+    # Arah agregat (circular)
     angles = [d1_dir, d2_dir, d3_dir]
     mean_deg, consistency = circular_mean_std(angles)
     feat["dir_mean"] = float(mean_deg)
     feat["dir_consistency"] = float(consistency)
-    
     mean_lr, _ = circular_mean_std([d1_dir, d3_dir])
     feat["dir_diff_center"] = float(angular_diff_abs(d2_dir, mean_lr))
     feat["dir_offshore_b2"] = float(180 - angular_diff_abs(d2_dir, SHORE_NORMAL))
     
+    # Wave intensity agregat (BARU)
+    waves = [d1_wave, d2_wave, d3_wave]
+    feat["wave_mean"] = float(np.mean(waves))
+    feat["wave_max"]  = float(max(waves))
+    feat["wave_diff_center"] = d2_wave - 0.5 * (d1_wave + d3_wave)
+    
     return feat
 
 
-# ==================== ENDPOINTS ====================
-
 @app.route("/predict", methods=["POST"])
 def predict():
-    """Endpoint utama: terima data 3 device, return prediction Safe/Danger."""
-    
     if model is None:
-        return jsonify({
-            "error": "Model belum dimuat",
-            "prediction": "Safe"  # fallback aman
-        }), 500
+        return jsonify({"error": "Model belum dimuat", "prediction": "Safe"}), 500
     
     try:
         data = request.get_json(force=True)
     except Exception as e:
         return jsonify({"error": f"Invalid JSON: {e}"}), 400
     
-    # Validasi field
-    required_fields = [
-        "device1_speed", "device1_direction",
-        "device2_speed", "device2_direction",
-        "device3_speed", "device3_direction"
+    required = [
+        "device1_speed", "device1_direction", "device1_wave_intensity",
+        "device2_speed", "device2_direction", "device2_wave_intensity",
+        "device3_speed", "device3_direction", "device3_wave_intensity"
     ]
-    missing = [f for f in required_fields if f not in data]
+    missing = [f for f in required if f not in data]
     if missing:
-        return jsonify({
-            "error": f"Field hilang: {missing}",
-            "required": required_fields
-        }), 400
+        return jsonify({"error": f"Field hilang: {missing}", "required": required}), 400
     
     try:
-        # Extract data
-        d1_speed = float(data["device1_speed"])
-        d1_dir   = float(data["device1_direction"])
-        d2_speed = float(data["device2_speed"])
-        d2_dir   = float(data["device2_direction"])
-        d3_speed = float(data["device3_speed"])
-        d3_dir   = float(data["device3_direction"])
-        
-        # Build features
-        feat = build_feature_vector(d1_speed, d1_dir, d2_speed, d2_dir, d3_speed, d3_dir)
+        feat = build_feature_vector(
+            float(data["device1_speed"]), float(data["device1_direction"]), float(data["device1_wave_intensity"]),
+            float(data["device2_speed"]), float(data["device2_direction"]), float(data["device2_wave_intensity"]),
+            float(data["device3_speed"]), float(data["device3_direction"]), float(data["device3_wave_intensity"]),
+        )
         X = pd.DataFrame([feat])[feature_names]
         
-        # Predict
         proba = model.predict_proba(X)[0]
         idx = int(np.argmax(proba))
-        prediction = classes[idx]  # langsung "Safe" atau "Danger"
+        prediction = classes[idx]
         confidence = float(proba[idx])
         
-        # Probabilitas per kelas
         proba_dict = {cls: float(p) for cls, p in zip(classes, proba)}
-        proba_safe   = proba_dict.get("Safe", 0.0)
-        proba_danger = proba_dict.get("Danger", 0.0)
         
-        # Log ke console
-        timestamp = data.get("timestamp", datetime.now().isoformat())
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] "
-              f"Predict: {prediction} "
-              f"(conf: {confidence:.2%}) "
-              f"| D1: v={d1_speed:.2f} | D2: v={d2_speed:.2f} | D3: v={d3_speed:.2f}")
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] {prediction} ({confidence:.1%}) | "
+              f"D1: v={data['device1_speed']:.2f},w={data['device1_wave_intensity']:.2f} | "
+              f"D2: v={data['device2_speed']:.2f},w={data['device2_wave_intensity']:.2f} | "
+              f"D3: v={data['device3_speed']:.2f},w={data['device3_wave_intensity']:.2f}")
         
-        response = {
+        return jsonify({
             "prediction": prediction,
             "confidence": confidence,
-            "probability_safe": proba_safe,
-            "probability_danger": proba_danger,
-            "timestamp": timestamp
-        }
-        
-        return jsonify(response), 200
-    
+            "probability_safe": proba_dict.get("Safe", 0.0),
+            "probability_danger": proba_dict.get("Danger", 0.0),
+            "timestamp": data.get("timestamp", datetime.now().isoformat())
+        }), 200
     except Exception as e:
-        print(f"[ERROR] Predict failed: {e}")
-        return jsonify({
-            "error": str(e),
-            "prediction": "Safe"  # fallback aman saat error
-        }), 500
+        print(f"[ERROR] {e}")
+        return jsonify({"error": str(e), "prediction": "Safe"}), 500
 
 
 @app.route("/health", methods=["GET"])
 def health():
-    """Endpoint health check."""
     return jsonify({
         "status": "ok",
         "model_loaded": model is not None,
         "classes": classes if classes else [],
         "feature_count": len(feature_names) if feature_names else 0,
-        "timestamp": datetime.now().isoformat()
     })
 
 
 @app.route("/", methods=["GET"])
 def index():
-    """Halaman info default."""
     return jsonify({
-        "service": "Rip Current ML Service",
-        "version": "1.0.0",
-        "classes": ["Safe", "Danger"],
-        "endpoints": {
-            "POST /predict": "Predict rip current dari data 3 device",
-            "GET /health": "Health check",
-            "GET /": "Info"
-        },
-        "expected_input": {
+        "service": "Rip Current ML Service v2 (with wave intensity)",
+        "endpoints": ["POST /predict", "GET /health"],
+        "input_format": {
             "device1_speed": "float (m/s)",
             "device1_direction": "float (deg 0-360)",
-            "device2_speed": "float (m/s)",
-            "device2_direction": "float (deg 0-360)",
-            "device3_speed": "float (m/s)",
-            "device3_direction": "float (deg 0-360)",
-            "timestamp": "string (optional, ISO format)"
+            "device1_wave_intensity": "float (score 0-10+)",
+            "device2_speed": "float",
+            "device2_direction": "float",
+            "device2_wave_intensity": "float",
+            "device3_speed": "float",
+            "device3_direction": "float",
+            "device3_wave_intensity": "float",
         },
         "output_format": {
             "prediction": "Safe | Danger",
-            "confidence": "float 0.0-1.0",
-            "probability_safe": "float 0.0-1.0",
-            "probability_danger": "float 0.0-1.0"
+            "confidence": "float 0-1",
+            "probability_safe": "float 0-1",
+            "probability_danger": "float 0-1",
         }
     })
 
 
-# ==================== MAIN ====================
-
 if __name__ == "__main__":
     print("=" * 60)
-    print("  RIP CURRENT ML SERVICE")
+    print("  RIP CURRENT ML SERVICE v2 (Kecepatan + Arah + Wave)")
     print("=" * 60)
     print()
     
     if not load_model():
-        print("\n[WARN] Server tetap berjalan, tapi /predict akan return fallback")
-        print("       Jalankan dulu: python step3_train_random_forest.py")
+        print("[WARN] Model belum trained. Jalankan: python step3_train_random_forest.py")
     
     print()
-    print(f"[Server] Listening on http://0.0.0.0:{PORT}")
-    print(f"[Server] Backend Bintang call: POST http://localhost:{PORT}/predict")
-    print(f"[Server] Health check: GET http://localhost:{PORT}/health")
+    print(f"[Server] http://localhost:{PORT}")
+    print(f"[Server] POST {PORT}/predict")
+    print(f"[Server] GET  {PORT}/health")
     print()
-    print("Tekan Ctrl+C untuk berhenti")
-    print("=" * 60)
     
     app.run(host="0.0.0.0", port=PORT, debug=False)

@@ -1,14 +1,6 @@
-============================================================
-EVALUATION REPORT - Rip Current Classifier (Safe/Danger)
-============================================================
-
-Fitur dasar: kecepatan arus, arah arus (per 3 buoy)
-Klasifikasi: 2 kelas binary - Safe vs Danger
-
-Dataset: features_engineered.csv
-Total samples: 3000
-Features: 15
-Classes: ['Danger', 'Safe']
+EVALUATION REPORT - Rip Current Classifier
+Fitur dasar: kecepatan, arah, wave_intensity (per 3 buoy)
+Total features: 21
 
 Train accuracy: 1.0000
 Test accuracy : 1.0000
@@ -30,18 +22,24 @@ Labels: ['Danger', 'Safe']
  [  0 300]]
 
 Feature Importance (all):
-kec_mean             0.219906
-kec_max              0.194754
-b2_kecepatan_arus    0.182112
-b3_kecepatan_arus    0.127491
-b1_kecepatan_arus    0.122303
-kec_std              0.052584
-dir_consistency      0.039974
-dir_offshore_b2      0.025964
-kec_diff_center      0.019808
-rip_speed_ratio      0.006696
-dir_diff_center      0.005623
-b2_arah_arus         0.001865
-b3_arah_arus         0.000419
-dir_mean             0.000376
-b1_arah_arus         0.000123
+kec_mean             1.665356e-01
+b2_kecepatan_arus    1.586760e-01
+wave_max             1.227959e-01
+wave_mean            1.006705e-01
+kec_max              9.985306e-02
+b2_wave_intensity    9.776114e-02
+b3_kecepatan_arus    7.859226e-02
+b1_kecepatan_arus    7.275078e-02
+b1_wave_intensity    2.856357e-02
+b3_wave_intensity    2.432742e-02
+kec_std              1.948813e-02
+kec_diff_center      1.671387e-02
+dir_offshore_b2      9.492198e-03
+rip_speed_ratio      2.495097e-03
+wave_diff_center     1.186845e-03
+dir_consistency      7.235239e-05
+b2_arah_arus         1.953165e-05
+dir_diff_center      5.554142e-06
+dir_mean             1.785930e-07
+b1_arah_arus         0.000000e+00
+b3_arah_arus         0.000000e+00
