@@ -36,7 +36,6 @@ const io = new Server(server, {
 
 let lastDataTime = null;
 let isOnline = false;
-let lastKnownPosition = null; // GPS terbaru
 
 // ─── PROCESS & SAVE ─────────────────────────
 
@@ -65,11 +64,6 @@ const processAndSendData = async (data) => {
       isOnline = true;
       io.emit('systemStatus', { online: true, message: 'Hardware terhubung' });
       console.log('Hardware ONLINE');
-    }
-
-    // Simpan posisi GPS terbaru (jika ada)
-    if (data.latitude && data.longitude) {
-      lastKnownPosition = { latitude: data.latitude, longitude: data.longitude, timestamp: data.timestamp };
     }
 
     io.emit('sensorUpdate', { ...data, prediction });
@@ -217,11 +211,6 @@ function generateMockBuoyData(scenario) {
 // MOCK mode: tanpa hardware
 if (MODE === 'mock') {
   console.log('[MODE] MOCK — tanpa hardware');
-
-  // Koordinat mock — ganti dengan koordinat pantai yang sesuai
-  const MOCK_BASE_LAT = -7.2575;
-  const MOCK_BASE_LNG = 112.7521;
-
   setInterval(() => {
     const isRip = Math.random() < 0.4;
     const d = generateMockBuoyData(isRip ? 'rip' : 'safe');
@@ -230,9 +219,6 @@ if (MODE === 'mock') {
       device2Speed: d.d2Speed, device2Direction: ((d.d2Dir % 360) + 360) % 360, device2WaveIntensity: d.d2Wave,
       device3Speed: d.d3Speed, device3Direction: ((d.d3Dir % 360) + 360) % 360, device3WaveIntensity: d.d3Wave,
       timestamp: new Date().toISOString(),
-      // GPS mock — simulasi pergerakan kecil
-      latitude:  parseFloat((MOCK_BASE_LAT + (Math.random() - 0.5) * 0.001).toFixed(6)),
-      longitude: parseFloat((MOCK_BASE_LNG + (Math.random() - 0.5) * 0.001).toFixed(6)),
     });
   }, 5000);
 }
