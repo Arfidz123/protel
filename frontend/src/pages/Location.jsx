@@ -1,69 +1,90 @@
 import { useState, useEffect } from "react";
-import { apiService } from "../services/api.service";
+import { io } from "socket.io-client";
 import { MapViewer } from "../components/MapViewer";
 import { LocationCard } from "../components/LocationCard";
 import { MapLoading, MapError } from "../components/MapStatus";
 import { MOCK_LOCATIONS } from "../data/Mock";
 
+const socket = io("http://localhost:5000");
+
+const USE_LIVE_GPS = true; // false = pakai MOCK_LOCATIONS
+
 export function Location() {
   const [locations, setLocations] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  useEffect(() => { fetchMapLocations(); }, []);
-
-//   const fetchMapLocations = async () => {
-//     try {
-//       setLoading(true);
-//       const response = await apiService.getMapLocations();
-//       if (response.success) {
-//         setLocations(response.data);
-//         setError(null);
-//       } else {
-//         setError(response.error || 'Failed to fetch map locations');
-//       }
-//     } catch (err) {
-//       setError('An unexpected error occurred');
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState(null);
 
   const formatCoordinates = (lat, lng) => {
-    const latDir = lat >= 0 ? 'N' : 'S';
-    const lngDir = lng >= 0 ? 'E' : 'W';
+    const latDir = lat >= 0 ? "N" : "S";
+    const lngDir = lng >= 0 ? "E" : "W";
     return `${Math.abs(lat).toFixed(4)}°${latDir}, ${Math.abs(lng).toFixed(4)}°${lngDir}`;
   };
 
-const fetchMapLocations = async () => {
-  try {
-    setLoading(true);
-    
-    const useMock = true; 
+  // Build locations array from a GPS data point received via socket/API
+  // Keeps the same shape as MOCK_LOCATIONS so MapViewer & LocationCard need no changes
+  const buildLocationsFromGPS = (data) => {
+    return [
+      {
+        deviceId:   "device1",
+        name:       "Buoy Device 1",
+        latitude:   data.latitude,
+        longitude:  data.longitude,
+        status:     "online",
+        lastUpdate: data.timestamp || new Date().toISOString(),
+      },
+      // Tambahkan device2, device3 di sini ketika hardware mengirim GPS masing-masing
+      // {
+      //   deviceId:  "device2",
+      //   name:      "Buoy Device 2",
+      //   latitude:  data.device2Latitude,
+      //   longitude: data.device2Longitude,
+      //   status:    "online",
+      //   lastUpdate: data.timestamp,
+      // },
+    ];
+  };
 
-    if (useMock) {
-      await new Promise(resolve => setTimeout(resolve, 600)); 
-      setLocations(MOCK_LOCATIONS);
-      setError(null);
-    } else {
-      const response = await apiService.getMapLocations();
-      if (response.success && response.data) {
-        setLocations(response.data);
-        setError(null);
-      } else {
-        setError(response.error || 'Failed to fetch map locations');
-      }
+  useEffect(() => {
+    if (!USE_LIVE_GPS) {
+      // ── MOCK mode ──────────────────────────────────
+      setTimeout(() => {
+        setLocations(MOCK_LOCATIONS);
+        setLoading(false);
+      }, 600);
+      return;
     }
-  } catch (err) {
-    setError('An unexpected error occurred');
-    console.error('Error fetching locations:', err);
-  } finally {
-    setLoading(false);
-  }
-};
+
+    // ── LIVE GPS mode ──────────────────────────────
+    // 1. Fetch last known position on page load
+    fetch("http://localhost:5000/api/location")
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.data?.latitude && res.data?.longitude) {
+          setLocations(buildLocationsFromGPS(res.data));
+        } else {
+          // No GPS yet — show mock as placeholder
+          setLocations(MOCK_LOCATIONS);
+        }
+        setError(null);
+      })
+      .catch(() => {
+        setLocations(MOCK_LOCATIONS); // fallback
+        setError(null);
+      })
+      .finally(() => setLoading(false));
+
+    // 2. Live updates via Socket.IO
+    socket.on("sensorUpdate", (data) => {
+      if (data.latitude && data.longitude) {
+        setLocations(buildLocationsFromGPS(data));
+      }
+    });
+
+    return () => socket.off("sensorUpdate");
+  }, []);
 
   if (loading) return <MapLoading />;
-  if (error) return <MapError error={error} onRetry={fetchMapLocations} />;
+  if (error)   return <MapError error={error} onRetry={() => window.location.reload()} />;
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -74,13 +95,13 @@ const fetchMapLocations = async () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <MapViewer locations={locations} formatCoordinates={formatCoordinates} />
-        
+
         <div className="space-y-4">
           {locations.map((loc) => (
-            <LocationCard 
-              key={loc.deviceId} 
-              location={loc} 
-              formatCoordinates={formatCoordinates} 
+            <LocationCard
+              key={loc.deviceId}
+              location={loc}
+              formatCoordinates={formatCoordinates}
             />
           ))}
         </div>
