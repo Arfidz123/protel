@@ -55,21 +55,25 @@
 #define LORA_MOSI       23
 #define LORA_SS         5
 #define LORA_RST        14
-#define LORA_DIO0       26
+#define LORA_DIO0       2
 #define LORA_FREQ       433E6
 #define LORA_SF         10
 #define LORA_BW         125E3
 #define LORA_POWER      17
 
 // GPS
-#define GPS_RX_PIN      17
-#define GPS_TX_PIN      16
+#define GPS_RX_PIN      16
+#define GPS_TX_PIN      17
 #define GPS_BAUD        9600
 
-// Sampling
-#define SEND_INTERVAL_MS    1000    // kirim tiap 1 detik
-#define MPU_SAMPLE_HZ       10      // sampling MPU 10 Hz dalam 1 detik = 10 samples
-#define MPU_SAMPLES_BUFFER  10      // buffer untuk wave intensity
+// Sampling & Multi-Buoy Timing
+// 3 buoy share 1 detik window = tiap buoy slot 500ms
+// SEND_INTERVAL 1500ms supaya total cycle = 1.5 detik (safe untuk SF10)
+// Buoy 1 kirim di waktu T, Buoy 2 di T+500ms, Buoy 3 di T+1000ms
+#define SEND_INTERVAL_MS    1500    // kirim tiap 1.5 detik per buoy
+#define STAGGER_DELAY_MS    500     // delay antar buoy (1500 / 3 = 500ms)
+#define MPU_SAMPLE_HZ       10      // sampling MPU 10 Hz
+#define MPU_SAMPLES_BUFFER  15      // buffer untuk wave intensity (15 sample dalam 1.5 detik)
 
 // Konstanta MPU6050
 #define ACCEL_SCALE     16384.0     // 1g = 16384 (FS_SEL=0, +/-2g)
@@ -204,8 +208,13 @@ void setup() {
   
   Serial.println();
   Serial.println("============================================================");
-  Serial.println("Mulai sampling sensor dan kirim data tiap 1 detik");
+  Serial.println("Mulai sampling sensor dan kirim data tiap 1.5 detik");
   Serial.println("GPS akan NO FIX sampai dapat sinyal (~32 detik outdoor)");
+  Serial.print("[TIME-STAGGER] Slot Buoy #");
+  Serial.print(NODE_ID);
+  Serial.print(": offset ");
+  Serial.print((NODE_ID - 1) * STAGGER_DELAY_MS);
+  Serial.println(" ms");
   Serial.println("============================================================");
   Serial.println();
   
@@ -215,6 +224,23 @@ void setup() {
     accel_mag_buffer[i] = 0;
     gyro_mag_buffer[i] = 0;
   }
+  
+  // === TIME STAGGERING ===
+  // Tiap buoy delay berbeda di awal supaya tidak collision LoRa
+  // Buoy 1: delay 0     ms (langsung kirim)
+  // Buoy 2: delay 500   ms
+  // Buoy 3: delay 1000  ms
+  // Setelah delay awal, tiap buoy kirim dengan interval sama (1500ms)
+  // sehingga tetap punya slot waktu sendiri
+  unsigned long stagger = (NODE_ID - 1) * STAGGER_DELAY_MS;
+  if (stagger > 0) {
+    Serial.print("Menunggu slot waktu (");
+    Serial.print(stagger);
+    Serial.println(" ms)...");
+    delay(stagger);
+  }
+  
+  last_send_ms = millis();
 }
 
 // ==================== KALIBRASI MPU ====================
@@ -340,30 +366,6 @@ void loop() {
     sendPacket(pkt);
     packet_counter++;
   }
-  static unsigned long lastDebug = 0;
-
-if (millis() - lastDebug > 5000) {
-  lastDebug = millis();
-
-  Serial.println("\n===== GPS DEBUG =====");
-
-  Serial.print("Chars Processed : ");
-  Serial.println(gps.charsProcessed());
-
-  Serial.print("Satellites      : ");
-  Serial.println(gps.satellites.value());
-
-  Serial.print("Location Valid  : ");
-  Serial.println(gps.location.isValid());
-
-  Serial.print("Location Updated: ");
-  Serial.println(gps.location.isUpdated());
-
-  Serial.print("HDOP            : ");
-  Serial.println(gps.hdop.value());
-
-  Serial.println("=====================\n");
-}
 }
 
 // ==================== BUILD PACKET ====================
@@ -420,45 +422,33 @@ BuoyPacket buildPacket() {
 // ==================== PRINT & SEND ====================
 
 void printPacket(const BuoyPacket& pkt) {
-
-  Serial.print("[#");
-  Serial.print(pkt.packet_num);
-  Serial.print("] ");
-
-  // ===== ARUS AIR (GPS) =====
+  Serial.print("[#"); Serial.print(pkt.packet_num); Serial.print("] ");
+  
+  // ARUS dari GPS
+  Serial.print("ARUS:");
   if (pkt.gps_valid) {
-
-    Serial.print("Arus=");
+    Serial.print(" v=");
     Serial.print(pkt.gps_speed, 2);
-    Serial.print(" m/s");
-
-    Serial.print(" | Arah=");
+    Serial.print("m/s arah=");
     Serial.print(pkt.gps_course, 0);
-    Serial.print((char)176);   // simbol derajat
-
+    Serial.print("deg");
   } else {
-
-    Serial.print("Arus=NO FIX");
+    Serial.print(" NO FIX");
   }
-
-  // ===== GELOMBANG (MPU6050) =====
-  Serial.print(" | Gelombang=");
-
-  if (pkt.wave_category == 0)
-    Serial.print("TENANG");
-  else if (pkt.wave_category == 1)
-    Serial.print("SEDANG");
-  else
-    Serial.print("GANAS");
-
-  Serial.print(" (");
+  
+  // GELOMBANG dari MPU
+  Serial.print(" | OMBAK: intensity=");
   Serial.print(pkt.wave_intensity, 2);
-  Serial.print(")");
+  Serial.print(" [");
+  if (pkt.wave_category == 0) Serial.print("CALM");
+  else if (pkt.wave_category == 1) Serial.print("MODERATE");
+  else Serial.print("ROUGH");
+  Serial.print("]");
 }
 
 void sendPacket(const BuoyPacket& pkt) {
   LoRa.beginPacket();
   LoRa.write((uint8_t*)&pkt, sizeof(pkt));
   int result = LoRa.endPacket();
-  Serial.println(result == 1 ? " | TX=OK" : " | TX=FAIL");
+  Serial.println(result == 1 ? " -> SENT" : " -> FAILED");
 }

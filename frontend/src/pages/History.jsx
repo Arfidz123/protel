@@ -1,12 +1,8 @@
 import { useState, useEffect } from "react";
-import { io } from "socket.io-client";
-import { Download, RefreshCw, Trash2 } from "lucide-react";
+import { Download, RefreshCw, Trash2, AlertCircle } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { HistoryStats } from "../components/HistoryStats";
 import { HistoryTable } from "../components/HistoryTable";
-import { MapLoading, MapError } from "../components/MapStatus";
-
-const socket = io("http://localhost:5000", { transports: ["websocket"] });
 
 export function History() {
   const [historicalData, setHistoricalData] = useState([]);
@@ -14,48 +10,20 @@ export function History() {
   const [error, setError] = useState(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
-  useEffect(() => {
-    fetchHistoricalData();
+  useEffect(() => { fetchHistoricalData(); }, []);
 
-    socket.on("sensorUpdate", (data) => {
-      const timestamp = new Date(data.timestamp);
-      const newRow = {
-        device1Speed:     parseFloat(data.device1Speed) || 0,
-        device1Direction: parseFloat(data.device1Direction) || 0,
-        device1Wave:      parseFloat(data.device1WaveIntensity || 0) || 0,
-        device2Speed:     parseFloat(data.device2Speed) || 0,
-        device2Direction: parseFloat(data.device2Direction) || 0,
-        device2Wave:      parseFloat(data.device2WaveIntensity || 0) || 0,
-        device3Speed:     parseFloat(data.device3Speed) || 0,
-        device3Direction: parseFloat(data.device3Direction) || 0,
-        device3Wave:      parseFloat(data.device3WaveIntensity || 0) || 0,
-        status:           data.prediction,
-        date: timestamp.toLocaleDateString("id-ID", { month: "short", day: "numeric" }),
-        time: timestamp.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
-        timestamp: data.timestamp,
-      };
-
-      setHistoricalData((prev) => {
-        if (prev[0]?.timestamp === newRow.timestamp) return prev;
-        return [newRow, ...prev].slice(0, 200);
-      });
-    });
-
-    return () => {
-      socket.off("sensorUpdate");
-    };
-  }, []);
-
+  // PENTING: History independent dari status hardware.
+  // Endpoint /api/history hanya butuh backend + database, tidak butuh hardware.
   const fetchHistoricalData = async () => {
     try {
       setLoading(true);
       const response = await fetch('http://localhost:5000/api/history?limit=200');
       const result = await response.json();
       
-      if (!result.success) throw new Error(result.error || 'Failed');
+      if (!result.success) throw new Error(result.error || 'Failed to fetch');
       
-      const transformedData = result.data.map(r => {
-        const timestamp = new Date(r.timestamp);
+      const transformed = result.data.map(r => {
+        const ts = new Date(r.timestamp);
         return {
           device1Speed:     parseFloat(r.device1_speed) || 0,
           device1Direction: parseFloat(r.device1_dir)   || 0,
@@ -67,15 +35,16 @@ export function History() {
           device3Direction: parseFloat(r.device3_dir)   || 0,
           device3Wave:      parseFloat(r.device3_wave)  || 0,
           status:           r.prediction,
-          date: timestamp.toLocaleDateString("id-ID", { month: "short", day: "numeric" }),
-          time: timestamp.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
+          date: ts.toLocaleDateString("id-ID", { month: "short", day: "numeric" }),
+          time: ts.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
           timestamp: r.timestamp,
         };
       });
       
-      setHistoricalData(transformedData);
+      setHistoricalData(transformed);
       setError(null);
     } catch (err) {
+      console.error('Error fetch history:', err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -83,6 +52,8 @@ export function History() {
   };
 
   const handleExport = () => {
+    if (historicalData.length === 0) return;
+    
     const headers = ['Date', 'Time', 'D1 Speed', 'D1 Dir', 'D1 Wave', 
                      'D2 Speed', 'D2 Dir', 'D2 Wave', 'D3 Speed', 'D3 Dir', 'D3 Wave', 'Status'];
     const rows = historicalData.map(r => [
@@ -115,15 +86,77 @@ export function History() {
     }
   };
 
-  if (loading) return <MapLoading />;
-  if (error) return <MapError error={error} onRetry={fetchHistoricalData} />;
+  // === LOADING STATE ===
+  if (loading) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto">
+        <div className="text-center py-12">
+          <RefreshCw className="w-8 h-8 text-gray-400 mx-auto mb-3 animate-spin" />
+          <p className="text-gray-500">Memuat data history...</p>
+        </div>
+      </div>
+    );
+  }
 
+  // === ERROR STATE (backend mati / database error) ===
+  if (error) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto">
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold text-gray-900">Full History</h1>
+        </div>
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+          <AlertCircle className="w-8 h-8 text-red-500 mx-auto mb-3" />
+          <p className="text-red-700 font-medium mb-1">Gagal memuat data</p>
+          <p className="text-sm text-red-600 mb-4">{error}</p>
+          <p className="text-xs text-gray-600 mb-3">
+            Pastikan backend (port 5000) berjalan dan database terhubung.
+          </p>
+          <Button onClick={fetchHistoricalData} variant="outline" size="sm">
+            <RefreshCw className="w-3 h-3 mr-2" /> Coba Lagi
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // === EMPTY STATE (hardware belum pernah nyala, database kosong) ===
+  if (historicalData.length === 0) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto">
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Full History</h1>
+            <p className="text-sm text-gray-500">Data historis dari 3 buoy</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={fetchHistoricalData}>
+            <RefreshCw className="w-3 h-3 mr-2" /> Refresh
+          </Button>
+        </div>
+        
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-12 text-center">
+          <p className="text-gray-700 font-medium mb-2">Belum ada data history</p>
+          <p className="text-sm text-gray-500 mb-1">
+            Database kosong. Data akan muncul saat:
+          </p>
+          <ul className="text-sm text-gray-500 list-disc list-inside mt-2">
+            <li>Hardware nyala dan kirim data, ATAU</li>
+            <li>Backend mode mock berjalan</li>
+          </ul>
+        </div>
+      </div>
+    );
+  }
+
+  // === NORMAL STATE ===
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Full History</h1>
-          <p className="text-sm text-gray-500">3 buoy dengan wave intensity ({historicalData.length} records)</p>
+          <h1 className="text-2xl font-bold text-gray-900">Full History</h1>
+          <p className="text-sm text-gray-500">
+            Data historis dari 3 buoy ({historicalData.length} records)
+          </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={fetchHistoricalData} className="gap-2">
@@ -132,7 +165,12 @@ export function History() {
           <Button onClick={handleExport} size="sm" className="gap-2">
             <Download className="w-3 h-3" /> Export CSV
           </Button>
-          <Button variant="destructive" size="sm" onClick={() => setShowResetConfirm(true)} className="gap-2 bg-red-600 text-white hover:bg-red-700">
+          <Button 
+            variant="destructive" 
+            size="sm" 
+            onClick={() => setShowResetConfirm(true)} 
+            className="gap-2"
+          >
             <Trash2 className="w-3 h-3" /> Reset
           </Button>
         </div>
@@ -140,12 +178,14 @@ export function History() {
 
       {showResetConfirm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg max-w-md mx-4">
+          <div className="bg-white p-6 rounded-lg max-w-md mx-4 shadow-xl">
             <h3 className="text-lg font-bold text-red-600 mb-2">Konfirmasi Reset</h3>
-            <p className="text-sm text-gray-600 mb-4">Semua history akan dihapus permanen.</p>
+            <p className="text-sm text-gray-600 mb-4">
+              Semua history akan dihapus permanen. Tindakan ini tidak bisa di-undo.
+            </p>
             <div className="flex gap-2 justify-end">
               <Button variant="outline" onClick={() => setShowResetConfirm(false)}>Batal</Button>
-              <Button variant="destructive" onClick={handleReset} className="bg-red-600 text-white hover:bg-red-700">Ya, Hapus</Button>
+              <Button variant="destructive" onClick={handleReset}>Ya, Hapus Semua</Button>
             </div>
           </div>
         </div>

@@ -35,18 +35,16 @@ function DeviceCardEnhanced({ name, speed, direction, waveIntensity, isOnline })
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-3 space-y-3">
-        {/* Kecepatan Arus */}
         <div className="flex items-center gap-3">
           <Activity className="w-4 h-4 text-blue-500" />
           <div className="flex-1">
             <p className="text-xs text-gray-500">Kecepatan Arus</p>
-            <p className="text-xl font-bold text-gray-900 tabular-nums">
+            <p className="text-xl font-bold tabular-nums">
               {(speed || 0).toFixed(2)} <span className="text-sm font-normal text-gray-500">m/s</span>
             </p>
           </div>
         </div>
         
-        {/* Arah Arus */}
         <div className="flex items-center gap-3">
           <Navigation 
             className="w-4 h-4 text-purple-500" 
@@ -54,13 +52,12 @@ function DeviceCardEnhanced({ name, speed, direction, waveIntensity, isOnline })
           />
           <div className="flex-1">
             <p className="text-xs text-gray-500">Arah Arus</p>
-            <p className="text-xl font-bold text-gray-900 tabular-nums">
+            <p className="text-xl font-bold tabular-nums">
               {Math.round(direction || 0)}<span className="text-sm font-normal text-gray-500">°</span>
             </p>
           </div>
         </div>
         
-        {/* Wave Intensity (BARU) */}
         <div className="flex items-center gap-3">
           <Waves className="w-4 h-4 text-cyan-500" />
           <div className="flex-1">
@@ -68,7 +65,7 @@ function DeviceCardEnhanced({ name, speed, direction, waveIntensity, isOnline })
               <p className="text-xs text-gray-500">Tingkat Gelombang</p>
               <WaveBadge intensity={waveIntensity || 0} />
             </div>
-            <p className="text-xl font-bold text-gray-900 tabular-nums">
+            <p className="text-xl font-bold tabular-nums">
               {(waveIntensity || 0).toFixed(2)} <span className="text-sm font-normal text-gray-500">score</span>
             </p>
           </div>
@@ -93,7 +90,6 @@ export function Dashboard() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      {/* Status Bar */}
       <div className={`mb-4 px-4 py-2 rounded-lg border flex items-center justify-between ${
         systemStatus.online ? "bg-green-50 border-green-200" : "bg-yellow-50 border-yellow-200"
       }`}>
@@ -106,18 +102,18 @@ export function Dashboard() {
           <span className={`text-sm font-medium ${
             systemStatus.online ? "text-green-700" : "text-yellow-700"
           }`}>
-            {systemStatus.online ? "Sistem Online" : "Menunggu Hardware..."}
+            {systemStatus.online ? "Sistem Online (3 buoy aktif)" : "Menunggu Hardware..."}
           </span>
         </div>
       </div>
 
       {!data ? (
         <div className="p-12 text-center">
-          <p className="text-gray-500">Belum ada data dari alat</p>
+          <p className="text-gray-500">Belum ada data dari hardware</p>
+          <p className="text-xs text-gray-400 mt-2">Nyalakan 3 buoy dan gateway</p>
         </div>
       ) : (
         <>
-          {/* 3 Device Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <DeviceCardEnhanced 
               name="Buoy 1 (Kiri)" 
@@ -142,7 +138,6 @@ export function Dashboard() {
             />
           </div>
           
-          {/* Prediction */}
           <div className="mt-6">
             <PredictionAlert 
               status={data.prediction || 'Safe'} 
