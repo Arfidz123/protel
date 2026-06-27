@@ -1,10 +1,14 @@
 /**
  * index.js - Backend Rip Current Detection
  * 
- * MODE=hardware: Baca 3 buoy REAL dari serial USB gateway
- * MODE=mock    : Generate data dummy tanpa hardware
+ * OPSI B: FLEKSIBEL
+ * - Tampilkan data buoy yang ada (yang nyala)
+ * - Kalau buoy mati, pakai data terakhir (last known)
+ * - ML tetap predict selama ada minimal 1 buoy ada data
+ * - Track status tiap buoy: ONLINE / STALE / OFFLINE / NEVER_SEEN
  * 
- * Aggregate data per buoy, predict ML, simpan DB, broadcast Socket.IO
+ * MODE=hardware: Baca 3 buoy dari serial USB
+ * MODE=mock    : Generate data dummy tanpa hardware
  */
 
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
@@ -25,10 +29,12 @@ const MODE = process.env.MODE || 'mock';
 const SERIAL_PORT_PATH = process.env.SERIAL_PORT || 'COM3';
 const SERIAL_BAUD = parseInt(process.env.SERIAL_BAUD || '115200');
 
-const OFFLINE_TIMEOUT_MS    = 30 * 1000;
+// Timing constants
+const OFFLINE_TIMEOUT_MS    = 30 * 1000;   // 30s tanpa data = OFFLINE
+const STALE_TIMEOUT_MS      = 10 * 1000;   // 10s tanpa data = STALE (data lama)
 const CLEANUP_INTERVAL_MS   = 24 * 60 * 60 * 1000;
 const DATA_RETENTION_DAYS   = 7;
-const AGGREGATION_WINDOW_MS = 5000;   // aggregate tiap 5 detik
+const AGGREGATION_WINDOW_MS = 5000;
 
 app.use(cors({
   origin: 'http://localhost:5173',
@@ -42,9 +48,19 @@ const io = new Server(server, {
   cors: { origin: 'http://localhost:5173', methods: ['GET', 'POST'], credentials: true },
 });
 
-let lastDataTime = null;
-let isOnline = false;
+// ════════════════════════════════════════════════════════════
+//  STATE PER BUOY
+// ════════════════════════════════════════════════════════════
+
+// Track data terakhir dan kapan terakhir terlihat untuk tiap buoy
+const buoyState = {
+  1: { lastData: null, lastSeenTime: null, status: 'NEVER_SEEN' },
+  2: { lastData: null, lastSeenTime: null, status: 'NEVER_SEEN' },
+  3: { lastData: null, lastSeenTime: null, status: 'NEVER_SEEN' },
+};
+
 let serialBuffer = [];
+let lastSystemAlive = null;  // last time SETIAP buoy kirim data
 
 // ════════════════════════════════════════════════════════════
 //  UTILITY
@@ -63,30 +79,46 @@ function mean(arr) {
   return arr.reduce((s, v) => s + v, 0) / arr.length;
 }
 
-function aggregateBuoy(samples) {
+function aggregateBuoySamples(samples) {
   if (samples.length === 0) return null;
   
   const validGps = samples.filter(d => d.gps_valid === 1);
   
-  return {
+  // === DEBUG LOG: Print raw GPS data dari hardware ===
+  const buoyId = samples[0].node_id;
+  console.log(`[DEBUG Buoy${buoyId}] ${samples.length} sample(s) | ${validGps.length} GPS valid`);
+  samples.forEach((s, i) => {
+    console.log(`  Sample ${i}: gps_valid=${s.gps_valid}, lat=${s.lat}, lon=${s.lon}, speed=${s.gps_speed}, course=${s.gps_course}`);
+  });
+  
+  const result = {
     speed:     validGps.length > 0 ? mean(validGps.map(d => d.gps_speed)) : 0,
     direction: validGps.length > 0 ? circularMean(validGps.map(d => d.gps_course)) : 0,
     wave:      mean(samples.map(d => d.wave_intensity || 0)),
     latitude:  validGps.length > 0 ? mean(validGps.map(d => d.lat)) : 0,
     longitude: validGps.length > 0 ? mean(validGps.map(d => d.lon)) : 0,
-    sampleCount: samples.length,
-    gpsValidCount: validGps.length,
   };
+  
+  console.log(`[DEBUG Buoy${buoyId}] Aggregated: lat=${result.latitude}, lon=${result.longitude}, speed=${result.speed.toFixed(3)}`);
+  return result;
+}
+
+// Hitung status buoy berdasarkan waktu last seen
+function calculateBuoyStatus(lastSeenTime) {
+  if (!lastSeenTime) return 'NEVER_SEEN';
+  const elapsed = Date.now() - lastSeenTime;
+  if (elapsed < AGGREGATION_WINDOW_MS + 1000) return 'ONLINE';
+  if (elapsed < STALE_TIMEOUT_MS) return 'ONLINE';
+  if (elapsed < OFFLINE_TIMEOUT_MS) return 'STALE';
+  return 'OFFLINE';
 }
 
 // ════════════════════════════════════════════════════════════
 //  PROCESS & SAVE
 // ════════════════════════════════════════════════════════════
 
-async function processAndSendData(data) {
+async function processAndSendData(payload, prediction) {
   try {
-    const prediction = await getPrediction(data);
-    
     const query = `
       INSERT INTO sensor_readings
         (device1_speed, device1_dir, device1_wave, device1_lat, device1_lon,
@@ -96,34 +128,144 @@ async function processAndSendData(data) {
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id
     `;
     const values = [
-      data.device1Speed, data.device1Direction, data.device1WaveIntensity || 0,
-      data.device1Lat || 0, data.device1Lon || 0,
-      data.device2Speed, data.device2Direction, data.device2WaveIntensity || 0,
-      data.device2Lat || 0, data.device2Lon || 0,
-      data.device3Speed, data.device3Direction, data.device3WaveIntensity || 0,
-      data.device3Lat || 0, data.device3Lon || 0,
-      prediction, data.timestamp,
+      payload.device1Speed, payload.device1Direction, payload.device1WaveIntensity || 0,
+      payload.device1Lat || 0, payload.device1Lon || 0,
+      payload.device2Speed, payload.device2Direction, payload.device2WaveIntensity || 0,
+      payload.device2Lat || 0, payload.device2Lon || 0,
+      payload.device3Speed, payload.device3Direction, payload.device3WaveIntensity || 0,
+      payload.device3Lat || 0, payload.device3Lon || 0,
+      prediction, payload.timestamp,
     ];
     await pool.query(query, values);
-    
-    lastDataTime = Date.now();
-    if (!isOnline) {
-      isOnline = true;
-      io.emit('systemStatus', { online: true, message: 'Hardware terhubung' });
-      console.log('Hardware ONLINE');
-    }
-    
-    io.emit('sensorUpdate', { ...data, prediction });
-    
-    console.log(`[${new Date().toLocaleTimeString()}] ` +
-      `B1:${data.device1Speed.toFixed(2)}m/s/w${(data.device1WaveIntensity||0).toFixed(1)} | ` +
-      `B2:${data.device2Speed.toFixed(2)}m/s/w${(data.device2WaveIntensity||0).toFixed(1)} | ` +
-      `B3:${data.device3Speed.toFixed(2)}m/s/w${(data.device3WaveIntensity||0).toFixed(1)} | ` +
-      `Pred=${prediction}`);
   } catch (err) {
-    console.error('Error process:', err.message);
+    console.error('Error save DB:', err.message);
   }
 }
+
+// Build payload dari buoyState dengan status indicator
+function buildPayload() {
+  const status1 = calculateBuoyStatus(buoyState[1].lastSeenTime);
+  const status2 = calculateBuoyStatus(buoyState[2].lastSeenTime);
+  const status3 = calculateBuoyStatus(buoyState[3].lastSeenTime);
+  
+  const d1 = buoyState[1].lastData;
+  const d2 = buoyState[2].lastData;
+  const d3 = buoyState[3].lastData;
+  
+  return {
+    // Buoy 1
+    device1Speed:         d1?.speed     || 0,
+    device1Direction:     d1?.direction || 0,
+    device1WaveIntensity: d1?.wave      || 0,
+    device1Lat:           d1?.latitude  || 0,
+    device1Lon:           d1?.longitude || 0,
+    device1Status:        status1,
+    
+    // Buoy 2
+    device2Speed:         d2?.speed     || 0,
+    device2Direction:     d2?.direction || 0,
+    device2WaveIntensity: d2?.wave      || 0,
+    device2Lat:           d2?.latitude  || 0,
+    device2Lon:           d2?.longitude || 0,
+    device2Status:        status2,
+    
+    // Buoy 3
+    device3Speed:         d3?.speed     || 0,
+    device3Direction:     d3?.direction || 0,
+    device3WaveIntensity: d3?.wave      || 0,
+    device3Lat:           d3?.latitude  || 0,
+    device3Lon:           d3?.longitude || 0,
+    device3Status:        status3,
+    
+    timestamp: new Date().toISOString(),
+  };
+}
+
+// ════════════════════════════════════════════════════════════
+//  AGGREGATION CYCLE (tiap 5 detik)
+// ════════════════════════════════════════════════════════════
+
+setInterval(async () => {
+  const now = Date.now();
+  
+  // Group samples per buoy dari window 5 detik terakhir
+  const samplesByBuoy = {
+    1: serialBuffer.filter(d => d.node_id === 1),
+    2: serialBuffer.filter(d => d.node_id === 2),
+    3: serialBuffer.filter(d => d.node_id === 3),
+  };
+  
+  // Update state per buoy: kalau ada sample baru → update lastData
+  let anyBuoyHasNewData = false;
+  for (let id = 1; id <= 3; id++) {
+    if (samplesByBuoy[id].length > 0) {
+      const aggregated = aggregateBuoySamples(samplesByBuoy[id]);
+      if (aggregated) {
+        buoyState[id].lastData = aggregated;
+        buoyState[id].lastSeenTime = now;
+        anyBuoyHasNewData = true;
+      }
+    }
+  }
+  
+  // Update status semua buoy (refresh tiap cycle)
+  for (let id = 1; id <= 3; id++) {
+    buoyState[id].status = calculateBuoyStatus(buoyState[id].lastSeenTime);
+  }
+  
+  // Clear buffer untuk window berikutnya
+  serialBuffer = [];
+  
+  // Cek apakah ada minimal 1 buoy yang pernah kirim data
+  const buoysWithData = [1, 2, 3].filter(id => buoyState[id].lastData !== null);
+  
+  if (buoysWithData.length === 0) {
+    // Belum ada buoy sama sekali yang kirim data
+    return;
+  }
+  
+  // Build payload dengan data terbaru (gabungan fresh + last known)
+  const payload = buildPayload();
+  
+  // Predict ML (akan tetap jalan walaupun ada data yang last known)
+  const prediction = await getPrediction(payload);
+  
+  // Save ke DB
+  await processAndSendData(payload, prediction);
+  
+  // System tracking
+  if (anyBuoyHasNewData) {
+    lastSystemAlive = now;
+  }
+  
+  // Broadcast ke frontend
+  io.emit('sensorUpdate', { ...payload, prediction });
+  
+  // Log status
+  const statusStr = `B1=${buoyState[1].status} B2=${buoyState[2].status} B3=${buoyState[3].status}`;
+  console.log(`[${new Date().toLocaleTimeString()}] ${statusStr} | Pred=${prediction}`);
+}, AGGREGATION_WINDOW_MS);
+
+// ════════════════════════════════════════════════════════════
+//  STATUS BROADCAST (tiap 5s, kirim status tiap buoy)
+// ════════════════════════════════════════════════════════════
+
+setInterval(() => {
+  const status = {
+    buoy1: calculateBuoyStatus(buoyState[1].lastSeenTime),
+    buoy2: calculateBuoyStatus(buoyState[2].lastSeenTime),
+    buoy3: calculateBuoyStatus(buoyState[3].lastSeenTime),
+  };
+  
+  const anyOnline = Object.values(status).some(s => s === 'ONLINE');
+  const allOnline = Object.values(status).every(s => s === 'ONLINE');
+  
+  io.emit('buoyStatus', {
+    ...status,
+    anyOnline,
+    allOnline,
+  });
+}, 5000);
 
 // ════════════════════════════════════════════════════════════
 //  SERIAL READER
@@ -148,7 +290,7 @@ function startSerialReader() {
       return;
     }
     console.log(`[Serial] Connected to ${SERIAL_PORT_PATH}!`);
-    console.log(`[Serial] Menunggu data dari 3 buoy via gateway...`);
+    console.log(`[Serial] Menunggu data dari buoy via gateway...`);
   });
   
   parser.on('data', (line) => {
@@ -171,65 +313,6 @@ function startSerialReader() {
     setTimeout(startSerialReader, 10000);
   });
 }
-
-// Aggregate buffer tiap 5 detik
-setInterval(async () => {
-  if (serialBuffer.length === 0) return;
-  
-  const samplesByBuoy = {
-    1: serialBuffer.filter(d => d.node_id === 1),
-    2: serialBuffer.filter(d => d.node_id === 2),
-    3: serialBuffer.filter(d => d.node_id === 3),
-  };
-  
-  const buoy1 = aggregateBuoy(samplesByBuoy[1]);
-  const buoy2 = aggregateBuoy(samplesByBuoy[2]);
-  const buoy3 = aggregateBuoy(samplesByBuoy[3]);
-  
-  // Kalau salah satu buoy tidak ada data dalam window, skip
-  if (!buoy1 || !buoy2 || !buoy3) {
-    console.log(`[Skip] Data tidak lengkap: B1=${samplesByBuoy[1].length} B2=${samplesByBuoy[2].length} B3=${samplesByBuoy[3].length}`);
-    serialBuffer = [];
-    return;
-  }
-  
-  await processAndSendData({
-    device1Speed:         +buoy1.speed.toFixed(3),
-    device1Direction:     +buoy1.direction.toFixed(1),
-    device1WaveIntensity: +buoy1.wave.toFixed(3),
-    device1Lat:           +buoy1.latitude.toFixed(6),
-    device1Lon:           +buoy1.longitude.toFixed(6),
-    
-    device2Speed:         +buoy2.speed.toFixed(3),
-    device2Direction:     +buoy2.direction.toFixed(1),
-    device2WaveIntensity: +buoy2.wave.toFixed(3),
-    device2Lat:           +buoy2.latitude.toFixed(6),
-    device2Lon:           +buoy2.longitude.toFixed(6),
-    
-    device3Speed:         +buoy3.speed.toFixed(3),
-    device3Direction:     +buoy3.direction.toFixed(1),
-    device3WaveIntensity: +buoy3.wave.toFixed(3),
-    device3Lat:           +buoy3.latitude.toFixed(6),
-    device3Lon:           +buoy3.longitude.toFixed(6),
-    
-    timestamp: new Date().toISOString(),
-  });
-  
-  serialBuffer = [];
-}, AGGREGATION_WINDOW_MS);
-
-// ════════════════════════════════════════════════════════════
-//  OFFLINE DETECTION
-// ════════════════════════════════════════════════════════════
-
-setInterval(() => {
-  if (!lastDataTime) return;
-  if (Date.now() - lastDataTime > OFFLINE_TIMEOUT_MS && isOnline) {
-    isOnline = false;
-    io.emit('systemStatus', { online: false, message: 'Hardware tidak terdeteksi' });
-    console.log('Hardware OFFLINE');
-  }
-}, 5000);
 
 // ════════════════════════════════════════════════════════════
 //  AUTO-CLEANUP
@@ -288,9 +371,14 @@ app.get('/api/stats', async (req, res) => {
 
 app.get('/api/status', (req, res) => {
   res.json({
-    success: true, online: isOnline, mode: MODE,
+    success: true,
+    mode: MODE,
+    buoys: {
+      1: { status: calculateBuoyStatus(buoyState[1].lastSeenTime), lastSeen: buoyState[1].lastSeenTime },
+      2: { status: calculateBuoyStatus(buoyState[2].lastSeenTime), lastSeen: buoyState[2].lastSeenTime },
+      3: { status: calculateBuoyStatus(buoyState[3].lastSeenTime), lastSeen: buoyState[3].lastSeenTime },
+    },
     serial_port: SERIAL_PORT_PATH,
-    lastDataTime: lastDataTime ? new Date(lastDataTime).toISOString() : null,
   });
 });
 
@@ -306,12 +394,17 @@ app.delete('/api/history', async (req, res) => {
 });
 
 app.get('/api/health', (req, res) => {
-  res.json({ success: true, mode: MODE, online: isOnline });
+  res.json({ success: true, mode: MODE });
 });
 
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
-  socket.emit('systemStatus', { online: isOnline });
+  // Kirim status awal
+  socket.emit('buoyStatus', {
+    buoy1: calculateBuoyStatus(buoyState[1].lastSeenTime),
+    buoy2: calculateBuoyStatus(buoyState[2].lastSeenTime),
+    buoy3: calculateBuoyStatus(buoyState[3].lastSeenTime),
+  });
 });
 
 // ════════════════════════════════════════════════════════════
@@ -321,8 +414,11 @@ io.on('connection', (socket) => {
 if (MODE === 'mock') {
   console.log('[MODE] MOCK — generate data tanpa hardware');
   
+  // Simulasi: generate data untuk semua 3 buoy
   setInterval(() => {
     const isRip = Math.random() < 0.4;
+    const now = Date.now();
+    
     let d1, d2, d3, w1, w2, w3, dir1, dir2, dir3;
     
     if (isRip) {
@@ -349,16 +445,20 @@ if (MODE === 'mock') {
       dir3 = 90 + Math.random() * 30 - 15;
     }
     
-    processAndSendData({
-      device1Speed: +d1.toFixed(3), device1Direction: ((dir1 % 360) + 360) % 360, device1WaveIntensity: +w1.toFixed(2),
-      device1Lat: -7.289000, device1Lon: 112.798000,
-      device2Speed: +d2.toFixed(3), device2Direction: ((dir2 % 360) + 360) % 360, device2WaveIntensity: +w2.toFixed(2),
-      device2Lat: -7.289500, device2Lon: 112.798500,
-      device3Speed: +d3.toFixed(3), device3Direction: ((dir3 % 360) + 360) % 360, device3WaveIntensity: +w3.toFixed(2),
-      device3Lat: -7.290000, device3Lon: 112.799000,
-      timestamp: new Date().toISOString(),
+    // Simulasi paket dari 3 buoy (push ke serialBuffer)
+    serialBuffer.push({
+      node_id: 1, gps_speed: d1, gps_course: ((dir1 % 360) + 360) % 360,
+      wave_intensity: w1, lat: -7.289, lon: 112.798, gps_valid: 1
     });
-  }, 5000);
+    serialBuffer.push({
+      node_id: 2, gps_speed: d2, gps_course: ((dir2 % 360) + 360) % 360,
+      wave_intensity: w2, lat: -7.2895, lon: 112.7985, gps_valid: 1
+    });
+    serialBuffer.push({
+      node_id: 3, gps_speed: d3, gps_course: ((dir3 % 360) + 360) % 360,
+      wave_intensity: w3, lat: -7.29, lon: 112.799, gps_valid: 1
+    });
+  }, 1500);
 }
 
 // ════════════════════════════════════════════════════════════
@@ -366,7 +466,8 @@ if (MODE === 'mock') {
 // ════════════════════════════════════════════════════════════
 
 if (MODE === 'hardware') {
-  console.log('[MODE] HARDWARE — baca 3 buoy real dari serial USB');
+  console.log('[MODE] HARDWARE — baca buoy real dari serial USB');
+  console.log('       Mode FLEKSIBEL: tampilkan buoy yang ada, last-known untuk yang mati');
   startSerialReader();
 }
 
