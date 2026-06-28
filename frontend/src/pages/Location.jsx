@@ -8,18 +8,13 @@ import { Wifi, WifiOff } from "lucide-react";
 
 const socket = io("http://localhost:5000", { transports: ["websocket"] });
 
-// Custom icon dengan warna berdasarkan status + prediction
 function createBuoyIcon(buoyStatus, prediction, nodeId) {
-  // Color logic:
-  // ONLINE + Danger = red, ONLINE + Safe = green
-  // STALE = yellow
-  // OFFLINE/NEVER_SEEN = gray
-  let color = '#9ca3af';  // gray default
+  let color = '#9ca3af';
   
   if (buoyStatus === 'ONLINE') {
     color = prediction === 'Danger' ? '#dc2626' : '#16a34a';
   } else if (buoyStatus === 'STALE') {
-    color = '#eab308';  // yellow
+    color = '#eab308';
   }
   
   const opacity = buoyStatus === 'OFFLINE' || buoyStatus === 'NEVER_SEEN' ? 0.5 : 1.0;

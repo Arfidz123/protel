@@ -1,6 +1,4 @@
--- ============================================================
--- DATABASE SCHEMA - Sensor Readings (3 buoy real + posisi map)
--- ============================================================
+-- DATABASE SCHEMA - Sensor Readings (3 buoy real + posisi map) 
 
 DROP TABLE IF EXISTS sensor_readings CASCADE;
 

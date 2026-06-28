@@ -12,8 +12,6 @@ export function History() {
 
   useEffect(() => { fetchHistoricalData(); }, []);
 
-  // PENTING: History independent dari status hardware.
-  // Endpoint /api/history hanya butuh backend + database, tidak butuh hardware.
   const fetchHistoricalData = async () => {
     try {
       setLoading(true);
@@ -86,7 +84,7 @@ export function History() {
     }
   };
 
-  // === LOADING STATE ===
+  // LOADING STATE 
   if (loading) {
     return (
       <div className="p-6 max-w-7xl mx-auto">
@@ -98,7 +96,7 @@ export function History() {
     );
   }
 
-  // === ERROR STATE (backend mati / database error) ===
+  // ERROR STATE (backend mati / database error) 
   if (error) {
     return (
       <div className="p-6 max-w-7xl mx-auto">
@@ -120,7 +118,7 @@ export function History() {
     );
   }
 
-  // === EMPTY STATE (hardware belum pernah nyala, database kosong) ===
+  // EMPTY STATE (hardware belum pernah nyala, database kosong) 
   if (historicalData.length === 0) {
     return (
       <div className="p-6 max-w-7xl mx-auto">
@@ -140,15 +138,14 @@ export function History() {
             Database kosong. Data akan muncul saat:
           </p>
           <ul className="text-sm text-gray-500 list-disc list-inside mt-2">
-            <li>Hardware nyala dan kirim data, ATAU</li>
-            <li>Backend mode mock berjalan</li>
+            <li>Hardware nyala dan kirim data</li>
           </ul>
         </div>
       </div>
     );
   }
 
-  // === NORMAL STATE ===
+  // NORMAL STATE 
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-6 flex items-center justify-between">

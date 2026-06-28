@@ -1,10 +1,3 @@
-"""
-==============================================================================
-STEP 3: TRAINING RANDOM FOREST
-==============================================================================
-Training binary classifier Safe/Danger dengan 21 fitur (termasuk wave intensity).
-"""
-
 import numpy as np
 import pandas as pd
 import joblib

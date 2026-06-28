@@ -1,20 +1,3 @@
-"""
-==============================================================================
-ML SERVICE - Flask Server (3 fitur per buoy)
-==============================================================================
-Endpoint:
-    POST /predict
-        Input:
-            device1_speed, device1_direction, device1_wave_intensity,
-            device2_speed, device2_direction, device2_wave_intensity,
-            device3_speed, device3_direction, device3_wave_intensity,
-            timestamp
-        Output:
-            {"prediction": "Safe"|"Danger", "confidence": 0-1, ...}
-    
-    GET /health
-"""
-
 import sys
 from datetime import datetime
 from pathlib import Path

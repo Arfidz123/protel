@@ -1,27 +1,3 @@
-"""
-==============================================================================
-STEP 2: FEATURE ENGINEERING
-==============================================================================
-Dari 9 fitur dasar (kecepatan, arah, wave per 3 buoy), tambah fitur turunan.
-
-Fitur turunan KECEPATAN:
-    - kec_mean, kec_std, kec_max
-    - kec_diff_center  : selisih B2 vs rata-rata B1, B3
-    - rip_speed_ratio  : rasio B2 vs rata-rata B1, B3
-
-Fitur turunan ARAH (circular):
-    - dir_consistency  : keseragaman arah antar buoy
-    - dir_diff_center  : selisih sudut B2 vs rata-rata B1, B3
-    - dir_offshore_b2  : seberapa dekat B2 ke offshore (180 deg)
-
-Fitur turunan WAVE INTENSITY (BARU):
-    - wave_mean        : rata-rata wave intensity
-    - wave_max         : intensity tertinggi
-    - wave_diff_center : selisih B2 vs rata-rata B1, B3 (apakah B2 lebih intense?)
-
-Total: 9 dasar + 12 turunan = 21 fitur
-"""
-
 import numpy as np
 import pandas as pd
 

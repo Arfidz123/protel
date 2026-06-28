@@ -9,7 +9,6 @@ const pool = new Pool({
   port:     parseInt(process.env.DB_PORT || '5432'),
 });
  
-// Test koneksi saat startup
 pool.connect((err, client, release) => {
   if (err) {
     console.error('Gagal konek ke PostgreSQL:', err.message);

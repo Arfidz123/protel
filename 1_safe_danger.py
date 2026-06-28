@@ -1,22 +1,3 @@
-"""
-==============================================================================
-STEP 1: SYNTHETIC DATA GENERATOR (Safe / Danger)
-==============================================================================
-Generate dataset simulasi 3 buoy dengan 3 fitur per buoy:
-    - kecepatan_arus  : m/s, dari GPS
-    - arah_arus       : derajat 0-360, dari GPS
-    - wave_intensity  : skor 0-10+, dari MPU6050
-
-Total fitur dasar: 3 fitur x 3 buoy = 9 fitur
-
-Logika pelabelan:
-    Safe   : arus lemah, arah seragam, gelombang tenang
-    Danger : (a) pola rip - B2 lebih cepat & offshore, ATAU
-             (b) storm   - semua kuat dan/atau gelombang ganas
-
-Output: synthetic_buoy_data.csv
-"""
-
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
@@ -24,7 +5,6 @@ from datetime import datetime, timedelta
 OUTPUT_FILE = "synthetic_buoy_data.csv"
 N_SAMPLES_PER_CLASS = 1500
 
-# Konvensi pantai selatan Indonesia
 SHORE_NORMAL = 180.0
 ALONGSHORE_E = 90.0
 ALONGSHORE_W = 270.0

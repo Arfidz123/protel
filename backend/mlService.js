@@ -1,9 +1,3 @@
-/**
- * mlService.js
- * Komunikasi backend Bintang dengan ML server Arhya.
- * Support: 3 fitur per buoy (speed, direction, wave_intensity)
- */
-
 require('dotenv').config();
 
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:8000/predict';

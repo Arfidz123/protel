@@ -1,16 +1,3 @@
-/**
- * index.js - Backend Rip Current Detection
- * 
- * OPSI B: FLEKSIBEL
- * - Tampilkan data buoy yang ada (yang nyala)
- * - Kalau buoy mati, pakai data terakhir (last known)
- * - ML tetap predict selama ada minimal 1 buoy ada data
- * - Track status tiap buoy: ONLINE / STALE / OFFLINE / NEVER_SEEN
- * 
- * MODE=hardware: Baca 3 buoy dari serial USB
- * MODE=mock    : Generate data dummy tanpa hardware
- */
-
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 
 const express = require('express');
@@ -25,7 +12,7 @@ const { ReadlineParser } = require('@serialport/parser-readline');
 
 const app  = express();
 const PORT = process.env.PORT || 5000;
-const MODE = process.env.MODE || 'mock';
+const MODE = process.env.MODE || 'hardware';
 const SERIAL_PORT_PATH = process.env.SERIAL_PORT || 'COM3';
 const SERIAL_BAUD = parseInt(process.env.SERIAL_BAUD || '115200');
 
@@ -48,10 +35,6 @@ const io = new Server(server, {
   cors: { origin: 'http://localhost:5173', methods: ['GET', 'POST'], credentials: true },
 });
 
-// ════════════════════════════════════════════════════════════
-//  STATE PER BUOY
-// ════════════════════════════════════════════════════════════
-
 // Track data terakhir dan kapan terakhir terlihat untuk tiap buoy
 const buoyState = {
   1: { lastData: null, lastSeenTime: null, status: 'NEVER_SEEN' },
@@ -61,10 +44,6 @@ const buoyState = {
 
 let serialBuffer = [];
 let lastSystemAlive = null;  // last time SETIAP buoy kirim data
-
-// ════════════════════════════════════════════════════════════
-//  UTILITY
-// ════════════════════════════════════════════════════════════
 
 function circularMean(angles) {
   if (angles.length === 0) return 0;
@@ -84,7 +63,7 @@ function aggregateBuoySamples(samples) {
   
   const validGps = samples.filter(d => d.gps_valid === 1);
   
-  // === DEBUG LOG: Print raw GPS data dari hardware ===
+  // DEBUG LOG: Print raw GPS data dari hardware 
   const buoyId = samples[0].node_id;
   console.log(`[DEBUG Buoy${buoyId}] ${samples.length} sample(s) | ${validGps.length} GPS valid`);
   samples.forEach((s, i) => {
@@ -112,10 +91,6 @@ function calculateBuoyStatus(lastSeenTime) {
   if (elapsed < OFFLINE_TIMEOUT_MS) return 'STALE';
   return 'OFFLINE';
 }
-
-// ════════════════════════════════════════════════════════════
-//  PROCESS & SAVE
-// ════════════════════════════════════════════════════════════
 
 async function processAndSendData(payload, prediction) {
   try {
@@ -181,10 +156,6 @@ function buildPayload() {
   };
 }
 
-// ════════════════════════════════════════════════════════════
-//  AGGREGATION CYCLE (tiap 5 detik)
-// ════════════════════════════════════════════════════════════
-
 setInterval(async () => {
   const now = Date.now();
   
@@ -246,10 +217,6 @@ setInterval(async () => {
   console.log(`[${new Date().toLocaleTimeString()}] ${statusStr} | Pred=${prediction}`);
 }, AGGREGATION_WINDOW_MS);
 
-// ════════════════════════════════════════════════════════════
-//  STATUS BROADCAST (tiap 5s, kirim status tiap buoy)
-// ════════════════════════════════════════════════════════════
-
 setInterval(() => {
   const status = {
     buoy1: calculateBuoyStatus(buoyState[1].lastSeenTime),
@@ -266,10 +233,6 @@ setInterval(() => {
     allOnline,
   });
 }, 5000);
-
-// ════════════════════════════════════════════════════════════
-//  SERIAL READER
-// ════════════════════════════════════════════════════════════
 
 function startSerialReader() {
   console.log(`[Serial] Mencoba buka ${SERIAL_PORT_PATH} @ ${SERIAL_BAUD} baud...`);
@@ -314,10 +277,6 @@ function startSerialReader() {
   });
 }
 
-// ════════════════════════════════════════════════════════════
-//  AUTO-CLEANUP
-// ════════════════════════════════════════════════════════════
-
 setInterval(async () => {
   try {
     const result = await pool.query(
@@ -328,10 +287,6 @@ setInterval(async () => {
     console.error('Cleanup error:', err.message);
   }
 }, CLEANUP_INTERVAL_MS);
-
-// ════════════════════════════════════════════════════════════
-//  REST API
-// ════════════════════════════════════════════════════════════
 
 app.get('/api/history', async (req, res) => {
   try {
@@ -406,64 +361,6 @@ io.on('connection', (socket) => {
     buoy3: calculateBuoyStatus(buoyState[3].lastSeenTime),
   });
 });
-
-// ════════════════════════════════════════════════════════════
-//  MOCK MODE
-// ════════════════════════════════════════════════════════════
-
-if (MODE === 'mock') {
-  console.log('[MODE] MOCK — generate data tanpa hardware');
-  
-  // Simulasi: generate data untuk semua 3 buoy
-  setInterval(() => {
-    const isRip = Math.random() < 0.4;
-    const now = Date.now();
-    
-    let d1, d2, d3, w1, w2, w3, dir1, dir2, dir3;
-    
-    if (isRip) {
-      d1 = Math.random() * 0.25 + 0.05;
-      d2 = Math.random() * 0.4 + 0.6;
-      d3 = Math.random() * 0.25 + 0.05;
-      w1 = Math.random() * 1.0 + 0.8;
-      w2 = Math.random() * 1.5 + 1.8;
-      w3 = Math.random() * 1.0 + 0.8;
-      dir1 = 90 + Math.random() * 30 - 15;
-      dir2 = 180 + Math.random() * 30 - 15;
-      dir3 = 90 + Math.random() * 30 - 15;
-    } else {
-      const bs = Math.random() * 0.2 + 0.05;
-      const bw = Math.random() * 0.6 + 0.2;
-      d1 = bs + Math.random() * 0.05;
-      d2 = bs + Math.random() * 0.05;
-      d3 = bs + Math.random() * 0.05;
-      w1 = bw + Math.random() * 0.2;
-      w2 = bw + Math.random() * 0.2;
-      w3 = bw + Math.random() * 0.2;
-      dir1 = 90 + Math.random() * 30 - 15;
-      dir2 = 90 + Math.random() * 30 - 15;
-      dir3 = 90 + Math.random() * 30 - 15;
-    }
-    
-    // Simulasi paket dari 3 buoy (push ke serialBuffer)
-    serialBuffer.push({
-      node_id: 1, gps_speed: d1, gps_course: ((dir1 % 360) + 360) % 360,
-      wave_intensity: w1, lat: -7.289, lon: 112.798, gps_valid: 1
-    });
-    serialBuffer.push({
-      node_id: 2, gps_speed: d2, gps_course: ((dir2 % 360) + 360) % 360,
-      wave_intensity: w2, lat: -7.2895, lon: 112.7985, gps_valid: 1
-    });
-    serialBuffer.push({
-      node_id: 3, gps_speed: d3, gps_course: ((dir3 % 360) + 360) % 360,
-      wave_intensity: w3, lat: -7.29, lon: 112.799, gps_valid: 1
-    });
-  }, 1500);
-}
-
-// ════════════════════════════════════════════════════════════
-//  HARDWARE MODE
-// ════════════════════════════════════════════════════════════
 
 if (MODE === 'hardware') {
   console.log('[MODE] HARDWARE — baca buoy real dari serial USB');
